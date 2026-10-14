@@ -149,18 +149,39 @@ static const HDItemInfo * getHDItem(const char * item_code)
 	return info;
 }
 
+// pItemCode (CellContext + 0x2C) is only filled when the cell is an item.
+// Storm's filename hash (HashString) sign-extends every byte, so a byte >= 0x80
+// would index its crypt table out of bounds and crash the client.
+static bool isSaneItemCode(const char * item_code)
+{
+	if (item_code == nullptr || *item_code == '\0')
+		return false;
+
+	size_t len = 0;
+	for (const char * p = item_code; *p != '\0'; ++p, ++len) {
+		const unsigned char c = (unsigned char)*p;
+		if (c < 0x20 || c > 0x7E || len >= 16)
+			return false;
+	}
+	return true;
+}
+
 bool HDItemDraw(d2::CellContext *cell, int x, int y, int draw_mode, uint8_t *palette)
 {
 	if (cell == nullptr || !isVerMin(V_113c)) {
 		return false;
 	}
 
-	// Item or socket
-	if (cell->v113.nUnitType != (DWORD)d2::UnitType::Item && cell->v113.nUnitType != 0) {
+	// Item or socket. Other draws (panels, loading screen, ...) leave nUnitType
+	// as 0 and pItemCode as leftover stack garbage - never feed those to loadHDItem.
+	const bool isSocket = isSocketCell(cell);
+	if (!isSocket && cell->v113.nUnitType != (DWORD)d2::UnitType::Item) {
 		return false;
 	}
-	bool isSocket = isSocketCell(cell);
 	const char * name = isSocket? "gemsocket" : cell->v113.pItemCode;
+	if (!isSocket && !isSaneItemCode(name)) {
+		return false;
+	}
 	auto info = getHDItem(name );
 	if (info == nullptr) {
 		return false;
